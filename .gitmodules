@@ -1,0 +1,9 @@
+[submodule "ZRTPCPP"]
+	path = ZRTPCPP
+	url = https://github.com/wernerd/ZRTPCPP.git
+[submodule "lib/ZRTPCPP"]
+	path = lib/ZRTPCPP
+	url = https://github.com/wernerd/ZRTPCPP.git
+[submodule "lib/openssl"]
+	path = lib/openssl
+	url = https://github.com/openssl/openssl.git
