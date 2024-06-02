@@ -1,0 +1,1 @@
+ALPS (Accelerated Linked Parallel System) is a high-performance remote desktop application written in C++, leveraging NVIDIA's CUDA toolkit for rapid, parallel processing to ensure seamless and efficient remote desktop experiences.
