@@ -17,6 +17,11 @@
 HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name 
+HWND hButton;                                   // start button
+Encoding::cuda cuda_maker;
+Monitor::monitorInfo::monitor mInfo;
+
+
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -34,7 +39,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     // TODO: Place code here.
     Logger::systemLogger.addLog(Logger::info, "Entering WinMain");
-    Monitor::monitorInfo::monitor mInfo;
     Monitor::monitorInfo::monitorInfo(&mInfo);
 
     for (unsigned short int i = 0; i < mInfo.friendlyName.size(); i++) {
@@ -42,13 +46,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         Logger::systemLogger.addLog(Logger::info, Conversions::rectVector_to_string(&mInfo.displayArea, i, DISPLAY));
         Logger::systemLogger.addLog(Logger::info, Conversions::rectVector_to_string(&mInfo.workArea, i, DISPLAY));
     }
- 
-    Encoding::cuda cuda_maker;
-
-    Encoding::encoder encoder_maker(cuda_maker.device, cuda_maker.context);
-
-
-
+    
+    Encoding::encoder encoder_maker(cuda_maker.device, cuda_maker.context, Conversions::rectVector_to_int(&mInfo.displayArea, 0));
+    encoder_maker.InitializeNVEncoder(cuda_maker.context, Conversions::rectVector_to_int(&mInfo.displayArea, 0));
+    encoder_maker.AllocateBuffers(Conversions::rectVector_to_int(&mInfo.displayArea, 0), 0);
+    encoder_maker.DeallocateBuffers();
+    
    /* Networking::connection networking(7123);
     if (networking.sendMessage("Hello from host!")) {
         std::string message;
@@ -167,6 +170,18 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
    }
 
+   hButton = CreateWindowW(L"BUTTON", // predefined class
+       L"Start Encoding", // Button text
+       WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, // styles 
+       10, // x pos
+       10, // y pos
+       100, // width
+       30, // height
+       hWnd, // parent window
+       (HMENU)1001, // Button ID
+       hInstance, // instance handle
+       nullptr); // pointer not needed
+
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
 
@@ -198,6 +213,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 break;
             case IDM_EXIT:
                 DestroyWindow(hWnd);
+                break;
+            case 1001:
+                MessageBox(hWnd, L"Starting encoding", L"Information", MB_OK);
                 break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);

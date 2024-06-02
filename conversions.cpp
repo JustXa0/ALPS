@@ -37,6 +37,16 @@ std::string Conversions::rectVector_to_string(std::vector<RECT>* rvector, int in
 	}
 }
 
+Conversions::RectInts Conversions::rectVector_to_int(std::vector<RECT>* rvector, int index) {
+	RectInts result;
+	RECT internalRect = rvector->at(index);
+	result.left = static_cast<int>(internalRect.left);
+	result.top = static_cast<int>(internalRect.top);
+	result.right = static_cast<int>(internalRect.right);
+	result.bottom = static_cast<int>(internalRect.bottom);
+	return result;
+}
+
 void Conversions::bytes_to_words(const std::vector<unsigned char>& bytes, std::vector<uint32_t>& words) {
 	size_t numWords = bytes.size() / 4;
 	words.resize(numWords);

@@ -72,7 +72,7 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ExternalIncludePath>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2\include;C:\Code\alps\alps\lib\NVIDIA\Samples\Utils;C:\Code\alps\alps\lib\NVIDIA\Interface;$(ExternalIncludePath)</ExternalIncludePath>
-    <LibraryPath>C:\Code\alps\alps\lib\NVIDIA\Lib\Win32;$(LibraryPath)</LibraryPath>
+    <LibraryPath>C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.2\lib\x64;C:\Code\alps\alps\lib\NVIDIA\Lib\Win32;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>

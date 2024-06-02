@@ -1,6 +1,8 @@
 #include "encoder.h"
 #include <vector>
 
+using namespace Microsoft::WRL;
+
 Encoding::cuda::cuda()
 {
 	device = 0;
@@ -37,11 +39,17 @@ Encoding::cuda::~cuda()
 
 // Begin of encoder class definitions
 
-Encoding::encoder::encoder(CUdevice device, CUcontext context) {
+Encoding::encoder::encoder(CUdevice device, CUcontext context, Conversions::RectInts display) {
 
 	encodePointer = nullptr;
 	encodeParams = {};
 	functionList.version = NV_ENCODE_API_FUNCTION_LIST_VER;
+	encodeGUID = GUID_NULL;
+	ready = true;
+	inputBuffer = NULL;
+	outputBuffer = NULL;
+	inputPtr = nullptr;
+	outputPtr = nullptr;
 
 	hLibrary = LoadLibrary(L"nvEncodeAPI64.dll");
 
@@ -54,40 +62,36 @@ Encoding::encoder::encoder(CUdevice device, CUcontext context) {
 			encodeParams.device = context;
 			encodeParams.reserved = 0;
 			encodeParams.apiVersion = NVENCAPI_VERSION;
-			if (Encoding::encoder::InitializeNVEncoder(context)) {
-				Encoding::encoder::SelectEncoderGUID();
-			}
-			else {
-				Logger::systemLogger.addLog(Logger::error, "Unable to initialize NV Encoder");
+
+			typedef NVENCSTATUS(NVENCAPI* NvEncodeAPICreateInstancePtr)(NV_ENCODE_API_FUNCTION_LIST* functionList);
+			NvEncodeAPICreateInstancePtr createInstanceFunc;
+
+			createInstanceFunc = (NvEncodeAPICreateInstancePtr)GetProcAddress(hLibrary, "NvEncodeAPICreateInstance");
+
+			if (createInstanceFunc) {
+				NVENCSTATUS status = createInstanceFunc(&functionList);
+				if (status != NV_ENC_SUCCESS) {
+					Logger::systemLogger.addLog(Logger::error, "Failed to create NVEncode function list.");
+					Logger::systemLogger.addLog(Logger::error, status);
+					ready = false;
+				}
 			}
 		}
 		else {
 			Logger::systemLogger.addLog(Logger::error, "CUDA context not properly initialized.");
+			ready = false;
 		}
 	}
 	else {
 		Logger::systemLogger.addLog(Logger::error, "Failed to load nvEncodeAPI library.");
+		ready = false;
 	}
-
 }
 
-bool Encoding::encoder::InitializeNVEncoder(CUcontext context) {
+bool Encoding::encoder::InitializeNVEncoder(CUcontext context, Conversions::RectInts display) {
 
-	typedef NVENCSTATUS(NVENCAPI* NvEncodeAPICreateInstancePtr)(NV_ENCODE_API_FUNCTION_LIST* functionList);
-	NvEncodeAPICreateInstancePtr createInstanceFunc;
-
-	createInstanceFunc = (NvEncodeAPICreateInstancePtr)GetProcAddress(hLibrary, "NvEncodeAPICreateInstance");
-
-	if (!createInstanceFunc) {
-		Logger::systemLogger.addLog(Logger::error, "Failed to retrieve NvEncodeAPICreateInstance function.");
-		return false;
-	}
-	
-	NVENCSTATUS status = createInstanceFunc(&functionList);
-
-	if (status != NV_ENC_SUCCESS) {
-		Logger::systemLogger.addLog(Logger::error, "Failed to create NVEncode function list.");
-		Logger::systemLogger.addLog(Logger::error, status);
+	if (!ready) {
+		Logger::systemLogger.addLog(Logger::error, "Cannot call method, functionList not created.");
 		return false;
 	}
 	encodeParams.version = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
@@ -95,7 +99,7 @@ bool Encoding::encoder::InitializeNVEncoder(CUcontext context) {
 	encodeParams.device = context;
 	encodeParams.reserved = 0;
 	encodeParams.apiVersion = NVENCAPI_VERSION;
-	status = functionList.nvEncOpenEncodeSessionEx(&encodeParams, &encodePointer);
+	NVENCSTATUS status = functionList.nvEncOpenEncodeSessionEx(&encodeParams, &encodePointer);
 	if (status != NV_ENC_SUCCESS) {
 		Logger::systemLogger.addLog(Logger::error, "Failed to open encode session.");
 		Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString(encodePointer));
@@ -108,9 +112,125 @@ bool Encoding::encoder::InitializeNVEncoder(CUcontext context) {
 		return false;
 	}
 
+	if (!SelectInputFormat()) {
+		Logger::systemLogger.addLog(Logger::error, "Aborting initalization of NVEncoder due to error in selection of InputFormat.");
+		return false;
+	}
 
+	Logger::systemLogger.addLog(Logger::info, "Initializing hardware encoder session.");
+	NV_ENC_INITIALIZE_PARAMS encParams = {};
+
+	encParams.version = NV_ENC_INITIALIZE_PARAMS_VER;
+	encParams.encodeGUID = encodeGUID;
+	encParams.encodeWidth = display.right;
+	encParams.encodeHeight = display.bottom;
+	encParams.frameRateNum = 60;
+	encParams.frameRateDen = 1;
+	encParams.bufferFormat = NV_ENC_BUFFER_FORMAT_NV12;
+
+	status = functionList.nvEncInitializeEncoder(encodePointer, &encParams);
+	if (status != NV_ENC_SUCCESS) {
+		writeErrorMessage("Failed to initialize encoder", status);
+		return false;
+	}
+
+	Logger::systemLogger.addLog(Logger::info, "Initialized hardware encoder session.");
 	return true;
 }
+
+bool Encoding::encoder::AllocateBuffers(Conversions::RectInts display, uint32_t numBFrames) {
+	if (numBFrames != 0) {
+		Logger::systemLogger.addLog(Logger::warning, "Currently, there is no support for B Frames in an effort to reduce latency. This may be looked at in the future. Total number of buffers will be 1.");
+		numBFrames = 0;
+	}
+	
+	// Calculate size of input buffer size
+	size_t frameSize = static_cast<size_t>(display.bottom) * display.right + display.right * (display.bottom / 2);
+	size_t numFrames = 60;
+	size_t inputBufferSize = frameSize;
+
+	// Allocate input buffer
+	CUresult cr = cuMemAlloc(&inputBuffer, inputBufferSize);
+	if (cr != CUDA_SUCCESS) {
+		Logger::systemLogger.addLog(Logger::error, "Failed to allocate input buffer.");
+		return false;
+	}
+
+	// Calculate size of output buffer size (for now, it will be the same size as an input buffer)
+	size_t outputBufferSize = inputBufferSize;
+
+	// Allocate output buffer
+	cr = cuMemAlloc(&outputBuffer, outputBufferSize);
+	if (cr != CUDA_SUCCESS) {
+		Logger::systemLogger.addLog(Logger::error, "Failed to allocate output buffer.");
+		return false;
+	}
+
+	// Start process of assigning them to NVENC
+	NV_ENC_REGISTER_RESOURCE resource = {};
+	resource.version = NV_ENC_REGISTER_RESOURCE_VER;
+	resource.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
+	resource.width = display.right;
+	resource.height = display.bottom;
+	resource.pitch = inputBufferSize;
+	resource.subResourceIndex = 0;
+	resource.resourceToRegister = reinterpret_cast<void*>(&inputBuffer);
+	resource.registeredResource = inputPtr;
+	resource.bufferFormat = NV_ENC_BUFFER_FORMAT_NV12;
+	resource.bufferUsage = NV_ENC_INPUT_IMAGE;
+	resource.pInputFencePoint = nullptr;
+	memset(resource.chromaOffset, 0, sizeof(resource.chromaOffset));
+	memset(resource.reserved1, 0, sizeof(resource.reserved1));
+	memset(resource.reserved2, NULL, sizeof(resource.reserved2));
+
+	NVENCSTATUS status = functionList.nvEncRegisterResource(encodePointer, &resource);
+	if (status != NV_ENC_SUCCESS) {
+		writeErrorMessage("Failed to register CUDA input buffer with NVENC API.", status);
+		DeallocateBuffers();
+		return false;
+	}
+
+	// Assigning output buffer to NVENC
+	resource.pitch = outputBufferSize;
+	resource.resourceToRegister = &outputBuffer;
+	resource.registeredResource = outputPtr;
+	resource.bufferUsage = NV_ENC_OUTPUT_BITSTREAM;
+
+	status = functionList.nvEncRegisterResource(encodePointer, &resource);
+	if (status != NV_ENC_SUCCESS) {
+		writeErrorMessage("Failed to register CUDA output buffer with NVENC API.", status);
+		DeallocateBuffers();
+		return false;
+	}
+	
+	Logger::systemLogger.addLog(Logger::info, "Succesfully created and registered CUDA input/output buffers with NVENC API.");
+	return true;
+}
+
+bool Encoding::encoder::DeallocateBuffers() {
+	if (inputBuffer != NULL && inputPtr != nullptr) {
+		NVENCSTATUS status = functionList.nvEncUnregisterResource(encodePointer, inputPtr);
+		if (status != NV_ENC_SUCCESS) {
+			writeErrorMessage("Failed to unregister input buffer.", status);
+			return false;
+		}
+		inputPtr = nullptr;
+		cuMemFree(inputBuffer);
+		inputBuffer = NULL;
+	}
+	if (outputBuffer != NULL && outputPtr != nullptr) {
+		NVENCSTATUS status = functionList.nvEncUnregisterResource(encodePointer, outputPtr);
+		if (status != NV_ENC_SUCCESS) {
+			writeErrorMessage("Failed to unregister output buffer.", status);
+			return false;
+		}
+		outputPtr = nullptr;
+		cuMemFree(outputBuffer);
+		outputBuffer = NULL;
+	}
+	return true;
+}
+
 
 bool Encoding::encoder::SelectEncoderGUID() {
 	uint32_t numGUID;
@@ -162,7 +282,7 @@ bool Encoding::encoder::SelectEncoderGUID() {
 		status = functionList.nvEncGetEncodeCaps(encodePointer, guidArray[possibleList.at(i)], &capsParam, &capsVal);
 		if (status != NV_ENC_SUCCESS) {
 			Logger::systemLogger.addLog(Logger::error, "Failed to check capabilities of encode presets.");
-			Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString);
+			Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString(encodePointer));
 			Logger::systemLogger.addLog(Logger::error, status);
 			free(guidArray);
 			return false;
@@ -182,7 +302,7 @@ bool Encoding::encoder::SelectEncoderGUID() {
 		status = functionList.nvEncGetEncodeCaps(encodePointer, guidArray[possibleList.at(i)], &capsParam, &capsVal);
 		if (status != NV_ENC_SUCCESS) {
 			Logger::systemLogger.addLog(Logger::error, "Failed to check capabilities of encode presets.");
-			Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString);
+			Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString(encodePointer));
 			Logger::systemLogger.addLog(Logger::error, status);
 			free(guidArray);
 			return false;
@@ -203,7 +323,7 @@ bool Encoding::encoder::SelectEncoderGUID() {
 	//	status = functionList.nvEncGetEncodeCaps(encodePointer, guidArray[possibleList.at(i)], &capsParam, &capsVal);
 	//	if (status != NV_ENC_SUCCESS) {
 	//		Logger::systemLogger.addLog(Logger::error, "Failed to check capabilities of encode presets.");
-	//		Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString);
+	//		Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString(encodePointer));
 	//		Logger::systemLogger.addLog(Logger::error, status);
 	//		free(guidArray);
 	//		return false;
@@ -224,7 +344,7 @@ bool Encoding::encoder::SelectEncoderGUID() {
 	//	status = functionList.nvEncGetEncodeCaps(encodePointer, guidArray[possibleList.at(i)], &capsParam, &capsVal);
 	//	if (status != NV_ENC_SUCCESS) {
 	//		Logger::systemLogger.addLog(Logger::error, "Failed to check capabilities of encode presets.");
-	//		Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString);
+	//		Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString(encodePointer));
 	//		Logger::systemLogger.addLog(Logger::error, status);
 	//		free(guidArray);
 	//		return false;
@@ -266,11 +386,71 @@ bool Encoding::encoder::SelectEncoderGUID() {
 	return true;
 }
 
+bool Encoding::encoder::SelectInputFormat() {
+	uint32_t formatCount;
+	NVENCSTATUS status = functionList.nvEncGetInputFormatCount(encodePointer, encodeGUID, &formatCount);
+	if (status != NV_ENC_SUCCESS) {
+		writeErrorMessage("Failed to obtain input format count.", status);
+		return false;
+	}
+	NV_ENC_BUFFER_FORMAT* buffer = (NV_ENC_BUFFER_FORMAT*) malloc(sizeof(NV_ENC_BUFFER_FORMAT) * formatCount);
+	if (buffer == NULL) {
+		Logger::systemLogger.addLog(Logger::error, "Failed to allocated buffer size for buffer formats.");
+		return false;
+	}
+
+	status = functionList.nvEncGetInputFormats(encodePointer, encodeGUID, buffer, formatCount, &formatCount);
+	if (status != NV_ENC_SUCCESS) {
+		writeErrorMessage("Failed to obtain input format buffer.", status);
+		free(buffer);
+		return false;
+	}
+	bool supported = false;
+	for (uint32_t i = 0; i < formatCount; i++) {
+		if (buffer[i] & NV_ENC_BUFFER_FORMAT_NV12) {
+			supported = true;
+			break;
+		}
+	}
+
+	free(buffer);
+
+	if (supported) {
+		Logger::systemLogger.addLog(Logger::info, "NV12 Format supported, continuing");
+		return true;
+	}
+	Logger::systemLogger.addLog(Logger::error, "NV12 Format not supported. Closing all processes");
+	return false;
+}
+
+//bool Encoding::encoder::CreateInputBuffers(Conversions::RectInts display, uint32_t numBuffers);
+
+
+void Encoding::encoder::writeErrorMessage(std::string message, NVENCSTATUS status) {
+	Logger::systemLogger.addLog(Logger::error, message);
+	Logger::systemLogger.addLog(Logger::error, status);
+	Logger::systemLogger.addLog(Logger::error, functionList.nvEncGetLastErrorString(encodePointer));
+}
+
 Encoding::encoder::~encoder() {
 
+	if (inputBuffer != NULL || outputBuffer != NULL) {
+		DeallocateBuffers();
+	}
+	// For some reason this doesn't work and gives a memory exception? Not sure why..
+	/*if (encodepointer != nullptr) {
+		nvencstatus status = functionlist.nvencdestroyencoder(encodepointer);
+		if (status != nv_enc_success) {
+			writeerrormessage("failed to destroy encoder.", status);
+		}
+	}*/
 	if (hLibrary != NULL) {
 		FreeLibrary(hLibrary);
 		Logger::systemLogger.addLog(Logger::info, "Successfully deloaded nvEncodeAPI library.");
 	}
+	
 	Logger::systemLogger.addLog(Logger::info, "Succesfully closed encoder class.");
 }
+
+// Beginning of capture class definitions
+
