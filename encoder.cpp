@@ -143,66 +143,61 @@ bool Encoding::encoder::AllocateBuffers(Conversions::RectInts display, uint32_t 
 		Logger::systemLogger.addLog(Logger::warning, "Currently, there is no support for B Frames in an effort to reduce latency. This may be looked at in the future. Total number of buffers will be 1.");
 		numBFrames = 0;
 	}
-	
-	// Calculate size of input buffer size
-	size_t frameSize = static_cast<size_t>(display.bottom) * display.right + display.right * (display.bottom / 2);
-	size_t numFrames = 60;
-	size_t inputBufferSize = frameSize;
 
-	// Allocate input buffer
-	CUresult cr = cuMemAlloc(&inputBuffer, inputBufferSize);
-	if (cr != CUDA_SUCCESS) {
-		Logger::systemLogger.addLog(Logger::error, "Failed to allocate input buffer.");
-		return false;
-	}
+	// Calculate input buffer size
+	size_t inputBufferSize = static_cast<size_t>(display.bottom * display.right * 3 / 2);
+	CUdeviceptr inputBuffer;
 
-	// Calculate size of output buffer size (for now, it will be the same size as an input buffer)
+	// Calculate output buffer size (for now this will just be the same size as the input buffer)
 	size_t outputBufferSize = inputBufferSize;
+	CUdeviceptr outputBuffer;
 
-	// Allocate output buffer
-	cr = cuMemAlloc(&outputBuffer, outputBufferSize);
-	if (cr != CUDA_SUCCESS) {
-		Logger::systemLogger.addLog(Logger::error, "Failed to allocate output buffer.");
+	cuInit(0);
+	CUresult error = cuMemAlloc(&inputBuffer, inputBufferSize);
+	if (error != CUDA_SUCCESS) {
+		Logger::systemLogger.addLog(Logger::error, "Failed to malloc input buffer.");
 		return false;
 	}
 
-	// Start process of assigning them to NVENC
+	
 	NV_ENC_REGISTER_RESOURCE resource = {};
 	resource.version = NV_ENC_REGISTER_RESOURCE_VER;
 	resource.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_CUDADEVICEPTR;
 	resource.width = display.right;
 	resource.height = display.bottom;
-	resource.pitch = inputBufferSize;
+	resource.pitch = (uint32_t)display.right;
 	resource.subResourceIndex = 0;
-	resource.resourceToRegister = reinterpret_cast<void*>(&inputBuffer);
+	resource.resourceToRegister = reinterpret_cast<void*>(inputBuffer);
 	resource.registeredResource = inputPtr;
 	resource.bufferFormat = NV_ENC_BUFFER_FORMAT_NV12;
 	resource.bufferUsage = NV_ENC_INPUT_IMAGE;
-	resource.pInputFencePoint = nullptr;
-	memset(resource.chromaOffset, 0, sizeof(resource.chromaOffset));
-	memset(resource.reserved1, 0, sizeof(resource.reserved1));
-	memset(resource.reserved2, NULL, sizeof(resource.reserved2));
 
 	NVENCSTATUS status = functionList.nvEncRegisterResource(encodePointer, &resource);
 	if (status != NV_ENC_SUCCESS) {
-		writeErrorMessage("Failed to register CUDA input buffer with NVENC API.", status);
-		DeallocateBuffers();
+		writeErrorMessage("Failed to register input buffer.", status);
+		cuMemFree(inputBuffer);
 		return false;
 	}
 
-	// Assigning output buffer to NVENC
-	resource.pitch = outputBufferSize;
-	resource.resourceToRegister = &outputBuffer;
+	error = cuMemAlloc(&outputBuffer, outputBufferSize);
+	if (error != CUDA_SUCCESS) {
+		Logger::systemLogger.addLog(Logger::error, "Failed to malloc output buffer.");
+		functionList.nvEncUnregisterResource(encodePointer, inputPtr);
+		cuMemFree(inputBuffer);
+	}
+	resource.resourceToRegister = reinterpret_cast<void*>(outputBuffer);
 	resource.registeredResource = outputPtr;
 	resource.bufferUsage = NV_ENC_OUTPUT_BITSTREAM;
 
 	status = functionList.nvEncRegisterResource(encodePointer, &resource);
 	if (status != NV_ENC_SUCCESS) {
-		writeErrorMessage("Failed to register CUDA output buffer with NVENC API.", status);
-		DeallocateBuffers();
+		writeErrorMessage("Failed to register output buffer.", status);
+		cuMemFree(outputBuffer);
+		functionList.nvEncUnregisterResource(encodePointer, inputPtr);
+		cuMemFree(inputBuffer);
 		return false;
 	}
-	
+
 	Logger::systemLogger.addLog(Logger::info, "Succesfully created and registered CUDA input/output buffers with NVENC API.");
 	return true;
 }
@@ -228,6 +223,7 @@ bool Encoding::encoder::DeallocateBuffers() {
 		cuMemFree(outputBuffer);
 		outputBuffer = NULL;
 	}
+	Logger::systemLogger.addLog(Logger::info, "Successfully deallocated input/output buffers.");
 	return true;
 }
 
@@ -434,9 +430,7 @@ void Encoding::encoder::writeErrorMessage(std::string message, NVENCSTATUS statu
 
 Encoding::encoder::~encoder() {
 
-	if (inputBuffer != NULL || outputBuffer != NULL) {
-		DeallocateBuffers();
-	}
+	DeallocateBuffers();
 	// For some reason this doesn't work and gives a memory exception? Not sure why..
 	/*if (encodepointer != nullptr) {
 		nvencstatus status = functionlist.nvencdestroyencoder(encodepointer);
