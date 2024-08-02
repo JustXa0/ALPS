@@ -38,8 +38,30 @@ Encoding::cuda::~cuda()
 }
 
 // Begin of encoder class definitions
+Encoding::encoder::encoder() {
+	encoding = false;
+
+	encodePointer = nullptr;
+	encodeParams = {};
+	functionList = {};
+	encodeParams = {};
+	encodeGUID = GUID_NULL;
+	ready = false;
+	inputBuffer = NULL;
+	outputBuffer = NULL;
+	inputPtr = nullptr;
+	outputPtr = nullptr;
+	hLibrary = LoadLibrary(L"nvEncodeAPI64.dll");
+
+	if (hLibrary == NULL) {
+		Logger::systemLogger.addLog(Logger::error, "Uhh this isn't good!");
+	}
+}
+
 
 Encoding::encoder::encoder(CUdevice device, CUcontext context, Conversions::RectInts display) {
+
+	encoding = false;
 
 	encodePointer = nullptr;
 	encodeParams = {};
@@ -225,6 +247,22 @@ bool Encoding::encoder::DeallocateBuffers() {
 	}
 	Logger::systemLogger.addLog(Logger::info, "Successfully deallocated input/output buffers.");
 	return true;
+}
+
+bool Encoding::encoder::StartEncoding() {
+	encoding = true;
+	Logger::systemLogger.addLog(Logger::info, "Starting encoding process now?");
+	return true;
+}
+
+bool Encoding::encoder::EndEncoding() {
+	encoding = false;
+	Logger::systemLogger.addLog(Logger::info, "Ending encoding process now.");
+	return true;
+}
+
+bool Encoding::encoder::GetStatus() {
+	return encoding;
 }
 
 

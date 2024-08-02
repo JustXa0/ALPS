@@ -17,9 +17,11 @@
 HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name 
-HWND hButton;                                   // start button
+HWND startEncoding;                             // start button
+HWND endEncoding;                               // end button
 Encoding::cuda cuda_maker;
 Monitor::monitorInfo::monitor mInfo;
+Encoding::encoder encode;
 
 
 
@@ -47,10 +49,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         Logger::systemLogger.addLog(Logger::info, Conversions::rectVector_to_string(&mInfo.workArea, i, DISPLAY));
     }
     
-    Encoding::encoder encoder_maker(cuda_maker.device, cuda_maker.context, Conversions::rectVector_to_int(&mInfo.displayArea, 0));
-    encoder_maker.InitializeNVEncoder(cuda_maker.context, Conversions::rectVector_to_int(&mInfo.displayArea, 0));
-    encoder_maker.AllocateBuffers(Conversions::rectVector_to_int(&mInfo.displayArea, 0), 0);
-    encoder_maker.DeallocateBuffers();
+    encode = Encoding::encoder::encoder(cuda_maker.device, cuda_maker.context, Conversions::rectVector_to_int(&mInfo.displayArea, 0));
+    encode.InitializeNVEncoder(cuda_maker.context, Conversions::rectVector_to_int(&mInfo.displayArea, 0));
+    encode.AllocateBuffers(Conversions::rectVector_to_int(&mInfo.displayArea, 0), 0);
+
+    // This struct should be sent to the encoder with every frame. How should this be implemented??
+    /*NV_ENC_PIC_PARAMS frameParams = {};
+    frameParams.version = NV_ENC_PIC_PARAMS_VER;
+    frameParams.inputWidth = (uint32_t)Conversions::rectVector_to_int(&mInfo.displayArea, 0).right;
+    frameParams.inputHeight = (uint32_t)Conversions::rectVector_to_int(&mInfo.displayArea, 0).bottom;
+    frameParams.inputPitch = (uint32_t)Conversions::rectVector_to_int(&mInfo.displayArea, 0).right;*/
+
     
    /* Networking::connection networking(7123);
     if (networking.sendMessage("Hello from host!")) {
@@ -170,7 +179,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
    }
 
-   hButton = CreateWindowW(L"BUTTON", // predefined class
+   startEncoding = CreateWindowW(L"BUTTON", // predefined class
        L"Start Encoding", // Button text
        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, // styles 
        10, // x pos
@@ -181,6 +190,18 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
        (HMENU)1001, // Button ID
        hInstance, // instance handle
        nullptr); // pointer not needed
+
+   endEncoding = CreateWindowW(L"BUTTON",
+       L"End Encoding",
+       WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+       30,
+       30,
+       100,
+       30,
+       hWnd,
+       (HMENU)1002,
+       hInstance,
+       nullptr);
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
@@ -215,7 +236,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 DestroyWindow(hWnd);
                 break;
             case 1001:
-                MessageBox(hWnd, L"Starting encoding", L"Information", MB_OK);
+                if (!encode.GetStatus()) {
+                    MessageBox(hWnd, L"Starting encoding", L"Information", MB_OK);
+                    encode.StartEncoding();
+                }
+                break;
+            case 1002:
+                if (encode.GetStatus()) {
+                    MessageBox(hWnd, L"Ending encoding", L"Information", MB_OK);
+                    encode.EndEncoding();
+                }
                 break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);

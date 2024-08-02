@@ -33,10 +33,16 @@ namespace Encoding {
 
 	public:
 
+		encoder();
 		encoder(const CUdevice device, const CUcontext context, const Conversions::RectInts);
 		bool InitializeNVEncoder(CUcontext context, Conversions::RectInts display);
 		bool AllocateBuffers(Conversions::RectInts display, uint32_t numBFrames);
 		bool DeallocateBuffers();
+
+		bool StartEncoding();
+		bool EndEncoding();
+
+		bool GetStatus();
 		~encoder();
 
 	private:
@@ -50,6 +56,7 @@ namespace Encoding {
 		void writeErrorMessage(std::string, NVENCSTATUS);
 		
 		bool ready;
+		bool encoding;
 		void* encodePointer;
 		NV_ENCODE_API_FUNCTION_LIST functionList;
 		NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS encodeParams;
