@@ -30,6 +30,9 @@ ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+void                UpdateCursorPosition(HWND hWnd, POINT &pt);
+void                ToggleMenuItem(HMENU hMenu, UINT itemID);
+bool                CheckToggle(HMENU hMenu, UINT itemID);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -221,6 +224,9 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    static RECT rect;
+    static POINT pt;
+
     switch (message)
     {
     case WM_COMMAND:
@@ -247,23 +253,52 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     encode.EndEncoding();
                 }
                 break;
+            case ID_TOOLS_CURSORPOSITION:
+                ToggleMenuItem(GetMenu(hWnd), LOWORD(wParam));
+                break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);
             }
         }
         break;
+
+    case WM_CREATE: 
+        SetTimer(hWnd, 1, 100, NULL);
+        break;
+
+    case WM_TIMER:
+        UpdateCursorPosition(hWnd, pt);
+        break;
+
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
             // TODO: Add any drawing code that uses hdc here...
 
+            // Drawing opaque box assuming it has been set to yes.
+            // Checking if the right portion of the menu has been checked
+            if (CheckToggle(GetMenu(hWnd), ID_TOOLS_CURSORPOSITION)) {
+                SetBkMode(hdc, OPAQUE);
+                SetBkColor(hdc, RGB(220, 220, 220));
+                SetTextColor(hdc, RGB(0, 0, 0));
+
+                std::wstring posText = L"X: " + std::to_wstring(pt.x) + L" Y: " + std::to_wstring(pt.y);
+                RECT textRect = { 10, rect.bottom - 30, 200, rect.bottom };
+                DrawText(hdc, posText.c_str(), -1, &textRect, DT_LEFT);
+            }
             EndPaint(hWnd, &ps);
         }
         break;
     case WM_DESTROY:
+        KillTimer(hWnd, 1);
         PostQuitMessage(0);
         break;
+
+    case WM_SIZE:
+        GetClientRect(hWnd, &rect);
+        break;
+
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
@@ -288,4 +323,37 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
     return (INT_PTR)FALSE;
+}
+
+void UpdateCursorPosition(HWND hWnd, POINT &pt) {
+    GetCursorPos(&pt);
+    ScreenToClient(hWnd, &pt);
+
+    InvalidateRect(hWnd, NULL, TRUE);
+    UpdateWindow(hWnd);
+}
+
+void ToggleMenuItem(HMENU hMenu, UINT itemID) {
+    MENUITEMINFO mii = { sizeof(MENUITEMINFO) };
+    mii.fMask = MIIM_STATE;
+    GetMenuItemInfo(hMenu, itemID, FALSE, &mii);
+    
+    if (mii.fState == MFS_CHECKED) {
+        mii.fState = MFS_UNCHECKED;
+        SetMenuItemInfo(hMenu, itemID, FALSE, &mii);
+    }
+    else if (mii.fState == MFS_UNCHECKED) {
+        mii.fState = MFS_CHECKED;
+        SetMenuItemInfo(hMenu, itemID, FALSE, &mii);
+    }
+}
+
+bool CheckToggle(HMENU hMenu, UINT itemID) {
+    MENUITEMINFO mii = { sizeof(MENUITEMINFO) };
+    mii.fMask = MIIM_STATE;
+    GetMenuItemInfo(hMenu, itemID, FALSE, &mii);
+    if (mii.fState == MFS_CHECKED) {
+        return true;
+    }
+    return false;
 }

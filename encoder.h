@@ -33,8 +33,20 @@ namespace Encoding {
 
 	public:
 
+		/**
+		* \brief Basic constructor used to forward declare object
+		*/
 		encoder();
-		encoder(const CUdevice device, const CUcontext context, const Conversions::RectInts);
+
+		/**
+		* \brief Constructor used to start interactions with NVENC API
+		* 
+		* \param device - a CUDA context used to initialize the NVENC API
+		* \param context - a CUDA context used to initialize the NVENC API
+		* \param display - a structure used to store a display's height and width
+		*/
+		encoder(const CUdevice device, const CUcontext context, const Conversions::RectInts display);
+
 		bool InitializeNVEncoder(CUcontext context, Conversions::RectInts display);
 		bool AllocateBuffers(Conversions::RectInts display, uint32_t numBFrames);
 		bool DeallocateBuffers();
