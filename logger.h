@@ -7,6 +7,7 @@
 #include <fstream>
 #include <string>
 #include <mutex>
+#include <ctime>
 
 // As of right now this is only being developed for Windows devices so Win32 API functions will be used.
 // In the future as the project is expanded this choice may be challenged and/or changed.
