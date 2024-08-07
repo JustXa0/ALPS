@@ -8,6 +8,10 @@
 #include <string>
 #include <mutex>
 
+// As of right now this is only being developed for Windows devices so Win32 API functions will be used.
+// In the future as the project is expanded this choice may be challenged and/or changed.
+#include <shlobj.h>
+
 namespace Logger {
 	
 	// Default levels of warnings used, more can be added if needed
@@ -22,7 +26,7 @@ namespace Logger {
 		* 
 		* \param filepath - Location of file relative to run location, will be changed to be absolute in future update
 		*/
-		Log(const std::string filepath);
+		Log(const std::wstring filepath);
 
 		/**
 		* \brief Destructor for Logging system, automatically sends a closing message before destroying the object
