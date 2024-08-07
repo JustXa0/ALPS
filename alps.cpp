@@ -2,6 +2,7 @@
 //
 
 #include <ctime>
+#include <shlobj.h>
 
 #include "alps.h"
 #include "conversions.h"
@@ -226,6 +227,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     static RECT rect;
     static POINT pt;
+    static PWSTR roaming = NULL;
+    static HRESULT hr;
 
     switch (message)
     {
@@ -256,6 +259,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case ID_TOOLS_CURSORPOSITION:
                 ToggleMenuItem(GetMenu(hWnd), LOWORD(wParam));
                 break;
+
+            case ID_TOOLS_LOGS:
+                hr = SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, NULL, &roaming);
+                if (SUCCEEDED(hr)) {
+                    std::wstring subfolder = std::wstring(roaming) + L"\\ALPS\\";
+                    ShellExecute(nullptr, L"open", subfolder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    CoTaskMemFree(roaming);
+                }
+                break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);
             }
@@ -276,7 +288,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             HDC hdc = BeginPaint(hWnd, &ps);
             // TODO: Add any drawing code that uses hdc here...
 
-            // Drawing opaque box assuming it has been set to yes.
             // Checking if the right portion of the menu has been checked
             if (CheckToggle(GetMenu(hWnd), ID_TOOLS_CURSORPOSITION)) {
                 SetBkMode(hdc, OPAQUE);
